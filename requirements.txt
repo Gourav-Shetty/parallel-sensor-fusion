@@ -1,0 +1,7 @@
+flask>=3.0
+numpy>=1.26
+# Real MPI on native Windows (no admin, no WSL):
+#   pip install mpi4py impi-rt
+# WSL Ubuntu instead: sudo apt install mpich && pip install mpi4py
+mpi4py>=3.1
+impi-rt>=2021.13; sys_platform == "win32"

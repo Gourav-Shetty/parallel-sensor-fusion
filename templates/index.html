@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sensor Fusion — MPI Reduce Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  #log { scrollbar-width: thin; scrollbar-color: #3f3f46 transparent; }
+  #log::-webkit-scrollbar { width: 6px; }
+  #log::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 99px; }
+  @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .live-dot { animation: pulse-dot 1.2s infinite; }
+  canvas { background: #09090b; border-radius: 0.5rem; }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 antialiased">
+
+<!-- Top bar: sticky blurred header (Gridline flexibility-dashboard.tsx header pattern) -->
+<header class="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-zinc-800 bg-zinc-950/90 px-4 backdrop-blur">
+  <span class="grid size-9 place-items-center rounded-lg bg-sky-500/15 text-sky-400">
+    <i data-lucide="activity" class="size-5"></i>
+  </span>
+  <span class="text-sm font-semibold tracking-tight">Sensor Fusion <span class="text-zinc-500">/ MPI Reduce</span></span>
+  <span id="livePill" class="ml-auto inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1 font-mono text-xs text-zinc-400">
+    <span id="liveDot" class="size-2 rounded-full bg-zinc-600"></span><span id="liveTxt">idle</span>
+  </span>
+</header>
+
+<!-- Page container (Gridline dashboard-content.tsx container pattern) -->
+<div class="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
+
+  <!-- Title block + status (Gridline title + mono subtitle pattern) -->
+  <div class="flex flex-col gap-4 border-b border-zinc-800 pb-5 sm:flex-row sm:items-end sm:justify-between">
+    <div class="space-y-2">
+      <h1 class="text-2xl font-semibold tracking-tight sm:text-3xl">Distributed measurement fusion</h1>
+      <p class="flex items-center gap-1.5 font-mono text-sm text-zinc-500">
+        <i data-lucide="radio" class="size-4"></i>
+        N sensor ranks → Rank 0 reduces with SUM / MAX / MIN → one result
+      </p>
+    </div>
+    <div class="flex items-center gap-2 font-mono text-xs text-zinc-500">
+      <i data-lucide="flask-conical" class="size-4"></i>
+      <span>native pool · WSL: <span class="text-zinc-300">mpirun -np N</span></span>
+    </div>
+  </div>
+
+  <!-- Metric cards (21st.dev dashboard metric-card pattern + Gridline WorkspaceCardItem pattern) -->
+  <section class="mt-5">
+    <h2 class="flex items-center gap-2 text-sm font-medium text-zinc-300">
+      <i data-lucide="gauge" class="size-5" stroke-width="1.6"></i>Fused result — Rank 0
+    </h2>
+    <div id="stats" class="mt-3 grid gap-4 sm:grid-cols-3">
+      <div class="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+        <div class="flex items-start justify-between">
+          <span class="grid size-10 place-items-center rounded-lg bg-zinc-800 text-sky-400"><i data-lucide="sigma" class="size-5"></i></span>
+          <span class="font-mono text-xs text-zinc-500">AVG</span>
+        </div>
+        <p class="mt-4 font-mono text-3xl font-bold">--.-</p>
+        <p class="mt-1 font-mono text-xs text-zinc-500">press Start to stream</p>
+      </div>
+      <div class="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+        <div class="flex items-start justify-between">
+          <span class="grid size-10 place-items-center rounded-lg bg-zinc-800 text-red-400"><i data-lucide="arrow-up-right" class="size-5"></i></span>
+          <span class="font-mono text-xs text-zinc-500">MAX</span>
+        </div>
+        <p class="mt-4 font-mono text-3xl font-bold">--.-</p>
+        <p class="mt-1 font-mono text-xs text-zinc-500">hottest rank</p>
+      </div>
+      <div class="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+        <div class="flex items-start justify-between">
+          <span class="grid size-10 place-items-center rounded-lg bg-zinc-800 text-emerald-400"><i data-lucide="arrow-down-right" class="size-5"></i></span>
+          <span class="font-mono text-xs text-zinc-500">MIN</span>
+        </div>
+        <p class="mt-4 font-mono text-3xl font-bold">--.-</p>
+        <p class="mt-1 font-mono text-xs text-zinc-500">coldest rank</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main grid -->
+  <div class="mt-4 grid gap-4 lg:grid-cols-[320px_1fr]">
+
+    <!-- Controls -->
+    <section class="h-fit rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+      <h2 class="flex items-center gap-2 text-sm font-medium text-zinc-300">
+        <i data-lucide="sliders-horizontal" class="size-5" stroke-width="1.6"></i>Run controls
+      </h2>
+      <label class="mt-4 block font-mono text-xs text-zinc-500">SENSORS · MPI RANKS · 1–8</label>
+      <input id="sensors" type="number" value="4" min="1" max="8"
+        class="mt-1 h-11 w-full rounded-lg border-0 bg-zinc-800 pl-3 font-mono text-sm text-zinc-100 outline-none focus:ring-2 focus:ring-sky-500">
+      <label class="mt-3 block font-mono text-xs text-zinc-500">TICKS · 5–200</label>
+      <input id="ticks" type="number" value="60" min="5" max="200"
+        class="mt-1 h-11 w-full rounded-lg border-0 bg-zinc-800 pl-3 font-mono text-sm text-zinc-100 outline-none focus:ring-2 focus:ring-sky-500">
+      <label class="mt-3 block font-mono text-xs text-zinc-500">WORKERS · 1–8</label>
+      <input id="workers" type="number" value="4" min="1" max="8"
+        class="mt-1 h-11 w-full rounded-lg border-0 bg-zinc-800 pl-3 font-mono text-sm text-zinc-100 outline-none focus:ring-2 focus:ring-sky-500">
+      <button onclick="startLive()"
+        class="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-sky-500 font-mono text-sm font-bold text-zinc-950 transition-colors hover:bg-sky-400">
+        <i data-lucide="play" class="size-4"></i>Start live fusion
+      </button>
+      <button onclick="runMPI()"
+        class="mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 font-mono text-sm font-bold text-zinc-950 transition-colors hover:bg-emerald-400">
+        <i data-lucide="network" class="size-4"></i>Run real MPI job
+      </button>
+      <div class="mt-2 grid grid-cols-2 gap-2">
+        <button onclick="stopLive()"
+          class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-zinc-800 font-mono text-xs font-bold text-zinc-200 transition-colors hover:bg-zinc-700">
+          <i data-lucide="square" class="size-4"></i>Stop
+        </button>
+        <button onclick="runBenchmark()"
+          class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-zinc-800 font-mono text-xs font-bold text-zinc-200 transition-colors hover:bg-zinc-700">
+          <i data-lucide="timer" class="size-4"></i>Benchmark
+        </button>
+      </div>
+      <p class="mt-3 hidden items-center gap-1 font-mono text-[11px] text-zinc-600 sm:flex">
+        <kbd class="rounded-md bg-zinc-800 px-2 py-1 text-zinc-400">Ctrl↵</kbd> starts the stream
+      </p>
+      <div class="mt-3 border-t border-zinc-800 pt-3">
+        <h3 class="flex items-center gap-2 font-mono text-xs text-zinc-500"><i data-lucide="cpu" class="size-4"></i>ENGINE</h3>
+        <div id="mpi" class="mt-1 font-mono text-xs text-zinc-500">checking…</div>
+      </div>
+    </section>
+
+    <!-- Charts + log -->
+    <section class="flex min-w-0 flex-col gap-4">
+      <div class="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+        <h2 class="flex items-center gap-2 text-sm font-medium text-zinc-300">
+          <i data-lucide="waves" class="size-5" stroke-width="1.6"></i>Per-sensor measurements
+        </h2>
+        <p class="mt-0.5 font-mono text-xs text-zinc-500">one line per rank · computed in parallel</p>
+        <canvas id="live" height="110" class="mt-3 w-full"></canvas>
+      </div>
+      <div class="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+        <h2 class="flex items-center gap-2 text-sm font-medium text-zinc-300">
+          <i data-lucide="trending-up" class="size-5" stroke-width="1.6"></i>Combined result
+        </h2>
+        <p class="mt-0.5 font-mono text-xs text-zinc-500">single fused average per tick · Rank 0</p>
+        <canvas id="fused" height="90" class="mt-3 w-full"></canvas>
+      </div>
+      <div class="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+        <h2 class="flex items-center gap-2 text-sm font-medium text-zinc-300">
+          <i data-lucide="terminal" class="size-5" stroke-width="1.6"></i>Reduce log
+        </h2>
+        <div id="log" class="mono mt-3 h-44 overflow-y-auto rounded-lg bg-zinc-950 p-3 text-xs text-zinc-400">press Start — partials and fused values appear here</div>
+      </div>
+    </section>
+  </div>
+
+  <footer class="mt-6 border-t border-zinc-800 pt-4 font-mono text-[11px] text-zinc-600">
+    patterns: Watermelon UI Gridline dashboard registry (topbar · metric cards · mono data) + 21st.dev dashboard components (metric cards · lucide icons)
+  </footer>
+</div>
+
+<script>
+lucide.createIcons();
+let es = null;
+const MAXP = 120;
+function setPill(txt, live) {
+  document.getElementById('liveTxt').textContent = txt;
+  const d = document.getElementById('liveDot');
+  d.className = 'size-2 rounded-full ' + (live ? 'bg-emerald-400 live-dot' : 'bg-zinc-600');
+}
+const liveChart = new Chart(document.getElementById('live'), {
+  type: 'line',
+  data: { labels: [], datasets: [] },
+  options: { animation: false, responsive: true, plugins: { legend: { labels: { boxWidth: 12, color: '#a1a1aa', font: { family: 'JetBrains Mono', size: 11 } } } }, scales: { x: { ticks: { color: '#52525b', font: { size: 10 } }, grid: { color: '#18181b' } }, y: { min: 15, max: 35, ticks: { color: '#52525b', font: { size: 10 } }, grid: { color: '#18181b' } } } }
+});
+const fusedChart = new Chart(document.getElementById('fused'), {
+  type: 'line',
+  data: { labels: [], datasets: [{ label: 'FUSED avg (rank 0)', data: [], borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,.08)', fill: true, borderWidth: 2, pointRadius: 0 }] },
+  options: { animation: false, responsive: true, plugins: { legend: { labels: { boxWidth: 12, color: '#a1a1aa', font: { family: 'JetBrains Mono', size: 11 } } } }, scales: { x: { ticks: { color: '#52525b', font: { size: 10 } }, grid: { color: '#18181b' } }, y: { min: 15, max: 35, ticks: { color: '#52525b', font: { size: 10 } }, grid: { color: '#18181b' } } } }
+});
+const COLORS = ['#f87171','#4ade80','#facc15','#c084fc','#22d3ee','#fb923c','#a3e635','#f472b6'];
+function log(msg){ const el=document.getElementById('log'); el.innerHTML += msg+'<br>'; el.scrollTop = el.scrollHeight; }
+function metricCards(cards) {
+  document.getElementById('stats').innerHTML = cards.map(c => `
+    <div class="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition-colors hover:bg-zinc-900/60">
+      <div class="flex items-start justify-between">
+        <span class="grid size-10 place-items-center rounded-lg bg-zinc-800 ${c.tone}"><i data-lucide="${c.icon}" class="size-5"></i></span>
+        <span class="font-mono text-xs text-zinc-500">${c.kicker}</span>
+      </div>
+      <p class="mono mt-4 text-3xl font-bold">${c.value}</p>
+      <p class="mono mt-1 text-xs text-zinc-500">${c.sub}</p>
+    </div>`).join('');
+  lucide.createIcons();
+}
+function startLive(){
+  stopLive(true);
+  const s=Math.max(1,Math.min(8,+document.getElementById('sensors').value||4)),
+        t=Math.max(5,Math.min(200,+document.getElementById('ticks').value||60)),
+        w=Math.max(1,Math.min(8,+document.getElementById('workers').value||4));
+  liveChart.data.labels=[]; liveChart.data.datasets=[]; fusedChart.data.labels=[]; fusedChart.data.datasets[0].data=[];
+  document.getElementById('log').innerHTML='';
+  setPill('live · ' + s + ' ranks', true);
+  es = new EventSource(`/stream?sensors=${s}&ticks=${t}&workers=${w}`);
+  es.onmessage = (e)=>{
+    const d=JSON.parse(e.data);
+    if(d.done){ log('✔ stream complete'); es.close(); es=null; setPill('done', false); return; }
+    liveChart.data.labels.push(d.tick);
+    fusedChart.data.labels.push(d.tick);
+    d.sensors.forEach((v,i)=>{
+      if(!liveChart.data.datasets[i]) liveChart.data.datasets.push({label:'rank '+i,data:[],borderColor:COLORS[i%8],pointRadius:0,borderWidth:2});
+      liveChart.data.datasets[i].data.push(v);
+    });
+    fusedChart.data.datasets[0].data.push(d.fused.avg);
+    if(liveChart.data.labels.length>MAXP){ liveChart.data.labels.shift(); liveChart.data.datasets.forEach(ds=>ds.data.shift()); fusedChart.data.labels.shift(); fusedChart.data.datasets[0].data.shift(); }
+    liveChart.update(); fusedChart.update();
+    log(`tick ${d.tick}: partials [${d.sensors.join(', ')}] → fused avg=${d.fused.avg} max=${d.fused.max} min=${d.fused.min}`);
+    metricCards([
+      { icon:'sigma', tone:'text-sky-400', kicker:'AVG', value:d.fused.avg, sub:`tick ${d.tick} · n=${d.fused.count}` },
+      { icon:'arrow-up-right', tone:'text-red-400', kicker:'MAX', value:d.fused.max, sub:'hottest rank' },
+      { icon:'arrow-down-right', tone:'text-emerald-400', kicker:'MIN', value:d.fused.min, sub:'coldest rank' },
+    ]);
+  };
+  es.onerror = ()=>{ log('connection hiccup — stopped. press Start again.'); stopLive(); };
+}
+function stopLive(silent){ if(es){ es.close(); es=null; } if(!silent) setPill('idle', false); }
+async function runBenchmark(){
+  log('…benchmarking sequential vs parallel…');
+  setPill('racing…', true);
+  const r = await fetch('/api/benchmark',{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({sensors:+document.getElementById('sensors').value, ticks:8, heavy_iters:200000, workers:+document.getElementById('workers').value})});
+  const j = await r.json();
+  metricCards([
+    { icon:'user', tone:'text-zinc-400', kicker:'SEQ', value:j.sequential_s+'s', sub:'1 worker' },
+    { icon:'users', tone:'text-sky-400', kicker:'PAR', value:j.parallel_s+'s', sub:j.workers + ' workers' },
+    { icon:'zap', tone:'text-emerald-400', kicker:'SPEEDUP', value:j.speedup+'x', sub:`${j.sensors} sensors · ${j.ticks} ticks` },
+  ]);
+  log(`benchmark: seq=${j.sequential_s}s par=${j.parallel_s}s speedup=${j.speedup}x fused=${JSON.stringify(j.fused_sample)}`);
+  setPill('race · ' + j.speedup + 'x', false);
+}
+async function runMPI(){
+  const n = Math.max(1, Math.min(8, +document.getElementById('sensors').value || 4));
+  log(`launching REAL MPI job: mpiexec -n ${n} …`);
+  setPill('mpi running…', true);
+  try {
+    const r = await fetch('/api/mpi-run', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sensors: n, ticks: 10 }) });
+    const j = await r.json();
+    if (!j.ok) { log('MPI failed: ' + (j.error || j.stderr || 'unknown')); setPill('mpi error', false); return; }
+    const rows = j.rows.filter(x => x.fused);
+    rows.forEach(d => log(`[rank 0/${j.ranks}] tick ${d.tick}: partials [${d.sensors.join(', ')}] → <b>fused avg=${d.fused.avg} max=${d.fused.max} min=${d.fused.min}</b>`));
+    const last = rows[rows.length - 1];
+    if (last) metricCards([
+      { icon: 'sigma', tone: 'text-sky-400', kicker: 'MPI AVG', value: last.fused.avg, sub: `mpiexec -n ${j.ranks}` },
+      { icon: 'arrow-up-right', tone: 'text-red-400', kicker: 'MPI MAX', value: last.fused.max, sub: 'hottest rank' },
+      { icon: 'arrow-down-right', tone: 'text-emerald-400', kicker: 'MPI MIN', value: last.fused.min, sub: 'coldest rank' },
+    ]);
+    log(`✔ MPI job done: ${rows.length} ticks × ${j.ranks} ranks, returncode=${j.returncode}`);
+    setPill('mpi done', false);
+  } catch (err) { log('MPI request failed: ' + err); setPill('mpi error', false); }
+}
+window.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey) && e.key==='Enter'){ e.preventDefault(); startLive(); } });
+fetch('/api/mpi-status').then(r=>r.json()).then(j=>{
+  document.getElementById('mpi').innerHTML = (j.mpiexec_found || j.mpi4py_found)
+    ? `REAL MPI ready — <span class="text-emerald-400">mpiexec: ${j.mpiexec_found} · mpi4py: ${j.mpi4py_found}</span><br><span class="text-zinc-600">${j.mpiexec_path || ''}</span>`
+    : `mpiexec: false | mpi4py: ${j.mpi4py_found} — pip install mpi4py impi-rt`;
+});
+</script>
+</body>
+</html>

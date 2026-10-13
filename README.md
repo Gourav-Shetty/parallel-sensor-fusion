@@ -56,13 +56,13 @@ python3 app.py
 # open http://localhost:5000 on Windows
 ```
 
-## 3. What to tell your professor (2 min)
+## 3. How it works
 
-1. Each MPI rank simulates one sensor node (`simulate_one_sensor` in `sensor_core.py:10`).
-2. Every tick each rank computes locally in parallel (CPU-heavy filter).
-3. `sensor_mpi.py` reduces with `comm.reduce(SUM/MAX/MIN)` + `comm.gather` — many values down to ONE result on Rank 0.
-4. Dashboard shows per-sensor curves + single fused curve + event log + sequential-vs-parallel speedup.
-5. If `mpiexec` is blocked in class, `/stream` fallback uses `ProcessPoolExecutor` — same math, never crashes.
+1. Each MPI rank simulates one sensor node (`simulate_one_sensor` in `sensor_core.py`).
+2. Every tick each rank measures locally in parallel (CPU-heavy filter stage).
+3. `sensor_mpi.py` reduces with `comm.reduce(SUM/MAX/MIN)` + `comm.gather` — many partial values down to ONE fused result on Rank 0.
+4. The dashboard shows per-sensor curves, the single fused curve, the reduce log, and a sequential-vs-parallel speedup benchmark.
+5. If `mpiexec` is unavailable, the `/stream` endpoint falls back to a `ProcessPoolExecutor` running the same math.
 
 ## 4. Files
 
